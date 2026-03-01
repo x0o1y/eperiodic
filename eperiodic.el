@@ -43,7 +43,7 @@
 (defgroup eperiodic nil
   "Periodic table for Emacs."
   :group 'tools
-  :link '(url-link ""))
+  :link '(url-link "http://www.tc.bham.ac.uk/~matt/published/Public/EperiodicEl.html"))
 
 (defcustom eperiodic-display-type 'conventional
   "*Order the orbitals are shown in.
@@ -572,7 +572,8 @@ symbol 0x.")
     (appearance)
     (discovery-date)
     (discovered-by)
-    (named-after))
+    (named-after)
+    (comp))
   "List of properties for which eperiodic has data.
 Units are also listed here.")
 
@@ -1227,7 +1228,8 @@ Units are also listed here.")
      (appearance . "Very hard, crystalline, steel-gray metal")
      (discovery-date . "1797 (France)")
      (discovered-by . "Louis Vauquelin")
-     (named-after . "Greek: chrôma (color)."))
+     (named-after . "Greek: chrôma (color).")
+     (comp . "Chromium is a cross-platform web browser developed by Google."))
 
     (25
      (name . "Manganese")
@@ -1497,7 +1499,8 @@ Units are also listed here.")
      (appearance . "A soft metalloid similar to sulfur")
      (discovery-date . "1818 (Sweden)")
      (discovered-by . "Jöns Berzelius")
-     (named-after . "Greek: selene (moon)."))
+     (named-after . "Greek: selene (moon).")
+     (comp . "Selenium automates browsers."))
 
     (35
      (name . "Bromine")
@@ -2010,7 +2013,8 @@ Units are also listed here.")
      (appearance . "Shiny, black nonmetallic solid")
      (discovery-date . "1811 (France)")
      (discovered-by . "Bernard Courtois")
-     (named-after . "Greek: iôeides (violet colored)."))
+     (named-after . "Greek: iôeides (violet colored).")
+     (comp . "Iodine lets you tunnel IPv4 data through a DNS server."))
 
     (54
      (name . "Xenon")
@@ -3009,7 +3013,8 @@ Units are also listed here.")
      (appearance . "Gray, soft, malleable, ductile, radioactive metal")
      (discovery-date . "1828 (Sweden)")
      (discovered-by . "Jöns Berzelius")
-     (named-after . "Named for Thor, Norse god of thunder."))
+     (named-after . "Named for Thor, Norse god of thunder.")
+     (comp . "Thorium Bubbles Chromium fork for Linux, Windows, MacOS, Android, and Raspberry Pi.")
 
     (91
      (name . "Protactinium")
