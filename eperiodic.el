@@ -3,7 +3,7 @@
 ;;; Copyright (C) 2002, 2003, 2004 Matthew P. Hodges
 
 ;; Author: Matthew P. Hodges <MPHodges@member.fsf.org>
-;; Version: $Id: eperiodic.el,v 1.96 2023-03-22
+;; Version: $Id: eperiodic.el,v 1.97 2026-10-05
 
 ;; eperiodic.el is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -30,9 +30,12 @@
 ;; Updated 2023-03-22 by Egor Maltsev <x0o1@ya.ru>
 ;; Add new elements, improve code.
 
+;; Updated 2026-10-05 by Egor Maltsev <x0o1@ya.ru>
+;; Add a calculated ADOMAH view.
+
 ;;; Code:
 
-(defconst eperiodic-version "2.0.1"
+(defconst eperiodic-version "2.1.0"
   "Version number of this package.")
 
 (eval-when-compile (require 'cl-lib))
@@ -45,14 +48,16 @@
   :group 'tools
   :link '(url-link "http://www.tc.bham.ac.uk/~matt/published/Public/EperiodicEl.html"))
 
-(defcustom eperiodic-display-type 'conventional
-  "*Order the orbitals are shown in.
+(defcustom eperiodic-display-type 'adomah
+  "*Periodic-table layout.
 The symbol conventional leads to the lanthanides and actinides being
 shown in separate rows. The symbol ordered leads to all the elements
-being shown in order."
+being shown in atomic-number order. The symbol adomah arranges orbital
+blocks according to the ADOMAH periodic law."
   :group 'eperiodic
   :type '(choice (const :tag "Separate lanthanides/actinides" conventional)
-                 (const :tag "By atomic number" ordered))
+                 (const :tag "By atomic number" ordered)
+                 (const :tag "ADOMAH" adomah))
   :set (lambda (sym val)
          (set-default sym val)
          (when (fboundp 'eperiodic-display)
@@ -64,6 +69,23 @@ being shown in order."
                          (set-buffer-modified-p nil))))
                    (buffer-list)))))
 (make-variable-buffer-local 'eperiodic-display-type)
+
+(defcustom eperiodic-adomah-orientation 'left
+  "*Direction in which the ADOMAH orbital blocks extend."
+  :group 'eperiodic
+  :type '(choice (const up) (const right) (const down) (const left))
+  :set (lambda (Sym Val)
+         (set-default Sym Val)
+         (when (fboundp 'eperiodic-display)
+           (mapcar (lambda (Buffer)
+                     (with-current-buffer Buffer
+                       (when (and (eq major-mode 'eperiodic-mode)
+                                  (eq eperiodic-display-type 'adomah))
+                         (setq eperiodic-adomah-orientation Val)
+                         (eperiodic-display)
+                         (set-buffer-modified-p nil))))
+                   (buffer-list)))))
+(make-variable-buffer-local 'eperiodic-adomah-orientation)
 
 (defcustom eperiodic-display-indentation 2
   "*Width of indentation at left-hand side of periodic table."
@@ -261,29 +283,29 @@ The properties of this face are inherited by others."
 
 (defface eperiodic-s-block-face
   '((((class color))
-     (:inherit eperiodic-generic-block-face :background "red1" :foreground "black")))
+     (:inherit eperiodic-generic-block-face :background "#bf616a" :foreground "#2e3440")))
   "Eperiodic face for s-block elements."
   :group 'eperiodic)
 
 (defface eperiodic-p-block-face
   '((((class color))
-     (:inherit eperiodic-generic-block-face :background "gold" :foreground "black")))
+     (:inherit eperiodic-generic-block-face :background "#ebcb8b" :foreground "#2e3440")))
   "Eperiodic face for p-block elements."
   :group 'eperiodic)
 
 (defface eperiodic-d-block-face
   '((((class color) (background light))
-     (:inherit eperiodic-generic-block-face :background "dodger blue" :foreground "black"))
+     (:inherit eperiodic-generic-block-face :background "#81a1c1" :foreground "#2e3440"))
     (((class color) (background dark))
-     (:inherit eperiodic-generic-block-face :background "dodger blue" :foreground "black")))
+     (:inherit eperiodic-generic-block-face :background "#81a1c1" :foreground "#2e3440")))
   "Eperiodic face for d-block elements."
   :group 'eperiodic)
 
 (defface eperiodic-f-block-face
   '((((class color) (background light))
-     (:inherit eperiodic-generic-block-face :background "lawn green" :foreground "black"))
+     (:inherit eperiodic-generic-block-face :background "#a3be8c" :foreground "#2e3440"))
     (((class color) (background dark))
-     (:inherit eperiodic-generic-block-face :background "lawn green" :foreground "black")))
+     (:inherit eperiodic-generic-block-face :background "#a3be8c" :foreground "#2e3440")))
   "Eperiodic face for f-block elements."
   :group 'eperiodic)
 
@@ -404,8 +426,111 @@ The properties of this face are inherited by others."
 
 ;; Constants
 
+(defconst eperiodic-adomah-period-count 8
+  "Number of periods represented by the ADOMAH model.")
+
+(defconst eperiodic-adomah-blocks [s p d f]
+  "Orbital blocks ordered by azimuthal quantum number.")
+
+(defun eperiodic-period-length (Period)
+  "Return the number of places in ADOMAH period PERIOD."
+  (unless (and (integerp Period) (> Period 0))
+    (error "Period must be a positive integer: %s" Period))
+  (/ (expt (+ (* 2 Period) 1 (expt -1 (1- Period))) 2) 8))
+
+(defun eperiodic-period-end (Period)
+  "Return the final atomic number in ADOMAH period PERIOD."
+  (unless (and (integerp Period) (> Period 0))
+    (error "Period must be a positive integer: %s" Period))
+  (let ((p (1+ Period)))
+    (/ (+ (* 2 (expt p 3))
+          p
+          (* 3 p (expt -1 (1- Period))))
+       12)))
+
+(defun eperiodic-period-start (Period)
+  "Return the first atomic number in ADOMAH period PERIOD."
+  (1+ (- (eperiodic-period-end Period)
+         (eperiodic-period-length Period))))
+
+(defun eperiodic-period-orbitals (Period)
+  "Return orbitals in Aufbau order for ADOMAH period PERIOD."
+  (unless (and (integerp Period) (> Period 0))
+    (error "Period must be a positive integer: %s" Period))
+  (let ((l (min 3 (/ (1- Period) 2)))
+        orbitals)
+    (while (>= l 0)
+      (push (intern (format "%d%s"
+                            (- Period l)
+                            (aref eperiodic-adomah-blocks l)))
+            orbitals)
+      (setq l (1- l)))
+    (reverse orbitals)))
+
+(defun eperiodic-adomah-orbital-ranges ()
+  "Return orbital atomic-number ranges through ADOMAH period eight."
+  (let ((z 1)
+        ranges)
+    (dotimes (period eperiodic-adomah-period-count)
+      (dolist (orbital (eperiodic-period-orbitals (1+ period)))
+        (let* ((block (substring (symbol-name orbital) -1))
+               (capacity (cdr (assoc block
+                                     eperiodic-orbital-degeneracies))))
+          (push (cons orbital (cons z (+ z capacity -1))) ranges)
+          (setq z (+ z capacity)))))
+    (reverse ranges)))
+
+(defun eperiodic-adomah-dimensions (&optional Orientation)
+  "Return ADOMAH grid dimensions for ORIENTATION."
+  (let ((width eperiodic-adomah-period-count)
+        (height
+         (+ (1- (length eperiodic-adomah-blocks))
+            (cl-loop for block across eperiodic-adomah-blocks
+                     sum (cdr (assoc (symbol-name block)
+                                     eperiodic-orbital-degeneracies))))))
+    (if (memq Orientation '(left right))
+        (cons height width)
+      (cons width height))))
+
+(defun eperiodic-adomah-coordinate (Z)
+  "Return the canonical ADOMAH coordinate for atomic number Z."
+  (unless (and (integerp Z)
+               (<= 1 Z)
+               (<= Z (eperiodic-period-end eperiodic-adomah-period-count)))
+    (error "Atomic number is outside the ADOMAH model: %s" Z))
+  (let* ((range
+          (cl-find-if (lambda (Entry)
+                        (and (>= Z (cadr Entry))
+                             (<= Z (cddr Entry))))
+                      (eperiodic-adomah-orbital-ranges)))
+         (name (symbol-name (car range)))
+         (block (intern (substring name -1)))
+         (l (cl-position block eperiodic-adomah-blocks))
+         (n (string-to-number (substring name 0 -1)))
+         (offset
+          (cl-loop for index from (1+ l) below (length eperiodic-adomah-blocks)
+                   sum (1+ (cdr (assoc
+                                 (symbol-name
+                                  (aref eperiodic-adomah-blocks index))
+                                 eperiodic-orbital-degeneracies))))))
+    (cons (1- n) (+ offset (- Z (cadr range))))))
+
+(defun eperiodic-adomah-transform-coordinate (Coordinate Orientation)
+  "Transform canonical ADOMAH COORDINATE for ORIENTATION."
+  (let* ((x (car Coordinate))
+         (y (cdr Coordinate))
+         (dimensions (eperiodic-adomah-dimensions))
+         (width (car dimensions))
+         (height (cdr dimensions)))
+    (pcase Orientation
+      ('up Coordinate)
+      ('right (cons (- height y 1) x))
+      ('down (cons (- width x 1) (- height y 1)))
+      ('left (cons y x))
+      (_ (error "Unknown ADOMAH orientation: %s" Orientation)))))
+
 (defconst eperiodic-orbital-order
-  '(1s 2s 2p 3s 3p 4s 3d 4p 5s 4d 5p 6s 4f 5d 6p 7s 5f 6d 7p)
+  '(1s 2s 2p 3s 3p 4s 3d 4p 5s 4d 5p 6s 4f 5d 6p 7s 5f 6d 7p 8s)
   "Order of atomic orbitals.
 Filled according to the Aufbau principle (mostly).")
 
@@ -462,7 +587,8 @@ See also `eperiodic-display-lists'.")
                       (18 . "Ar")
                       (36 . "Kr")
                       (54 . "Xe")
-                      (86 . "Rn")))
+                      (86 . "Rn")
+                      (118 . "Og")))
         (so-far "")
         (z 1)
         label degeneracy orbital rare-gas result)
@@ -3014,7 +3140,7 @@ Units are also listed here.")
      (discovery-date . "1828 (Sweden)")
      (discovered-by . "Jöns Berzelius")
      (named-after . "Named for Thor, Norse god of thunder.")
-     (comp . "Thorium Bubbles Chromium fork for Linux, Windows, MacOS, Android, and Raspberry Pi.")
+     (comp . "Thorium Bubbles Chromium fork for Linux, Windows, MacOS, Android, and Raspberry Pi."))
 
     (91
      (name . "Protactinium")
@@ -3770,7 +3896,61 @@ Units are also listed here.")
      (appearance . "n/a")
      (discovery-date . "1999")
      (discovered-by . "n/a")
-     (named-after . "Recognises Professor Yuri Oganessian (born 1933) for his pioneering contributions to transactinoid elements research.")))
+     (named-after . "Recognises Professor Yuri Oganessian (born 1933) for his pioneering contributions to transactinoid elements research."))
+
+    (119
+     (name . "Ununennium")
+     (symbol . "Uu")
+     (atomic-mass . "n/a")
+     (density . "n/a")
+     (melting-point . "n/a")
+     (boiling-point . "n/a")
+     (atomic-radius . "n/a")
+     (covalent-radius . "n/a")
+     (ionic-radius . "n/a")
+     (atomic-volume . "n/a")
+     (specific-heat . "n/a")
+     (fusion-heat . "n/a")
+     (evaporation-heat . "n/a")
+     (thermal-conductivity . "n/a")
+     (debye-temperature . "n/a")
+     (pauling-negativity-number . "n/a")
+     (first-ionization-energy . "n/a")
+     (oxidation-states . "n/a")
+     (lattice-structure . "n/a")
+     (lattice-constant . "n/a")
+     (lattice-c/a-ratio . "n/a")
+     (appearance . "n/a")
+     (discovery-date . "Predicted")
+     (discovered-by . "n/a")
+     (named-after . "Temporary systematic element name."))
+
+    (120
+     (name . "Unbinilium")
+     (symbol . "Ub")
+     (atomic-mass . "n/a")
+     (density . "n/a")
+     (melting-point . "n/a")
+     (boiling-point . "n/a")
+     (atomic-radius . "n/a")
+     (covalent-radius . "n/a")
+     (ionic-radius . "n/a")
+     (atomic-volume . "n/a")
+     (specific-heat . "n/a")
+     (fusion-heat . "n/a")
+     (evaporation-heat . "n/a")
+     (thermal-conductivity . "n/a")
+     (debye-temperature . "n/a")
+     (pauling-negativity-number . "n/a")
+     (first-ionization-energy . "n/a")
+     (oxidation-states . "n/a")
+     (lattice-structure . "n/a")
+     (lattice-constant . "n/a")
+     (lattice-c/a-ratio . "n/a")
+     (appearance . "n/a")
+     (discovery-date . "Predicted")
+     (discovered-by . "n/a")
+     (named-after . "Temporary systematic element name.")))
   "Alist mapping elements and their properties.
 Each car is an atomic number and each cdr a list of properties.")
 
@@ -4425,6 +4605,92 @@ Any previous buffer contents are deleted."
                                 'eperiodic-at-number
                                 eperiodic-last-displayed-element)))
 
+(defun eperiodic-adomah-cells ()
+  "Return displayed elements and their transformed ADOMAH coordinates."
+  (mapcar
+   (lambda (Element)
+     (let* ((z (car Element))
+            (coordinate (eperiodic-adomah-transform-coordinate
+                         (eperiodic-adomah-coordinate z)
+                         eperiodic-adomah-orientation)))
+       (list z (car coordinate) (cdr coordinate))))
+   eperiodic-element-properties))
+
+(defun eperiodic-insert-adomah-table ()
+  "Insert an ADOMAH periodic table into the current buffer."
+  (let* ((display-width
+          (max eperiodic-element-display-width
+               (apply #'max
+                      (mapcar
+                       (lambda (Element)
+                         (length (eperiodic-get-element-property
+                                  (car Element) 'symbol)))
+                       eperiodic-element-properties))))
+         (indentation (max eperiodic-display-indentation 0))
+         (inhibit-read-only t)
+         (separation (max eperiodic-element-separation 0))
+         (dimensions
+          (eperiodic-adomah-dimensions eperiodic-adomah-orientation))
+         (width (car dimensions))
+         (height (cdr dimensions))
+         (cells (make-hash-table :test 'equal))
+         face)
+    (erase-buffer)
+    (dolist (cell (eperiodic-adomah-cells))
+      (puthash (cons (nth 1 cell) (nth 2 cell)) (car cell) cells))
+    (cl-loop for y from 0 below height
+             do
+             (insert (make-string indentation ?\ ))
+             (cl-loop for x from 0 below width
+                      for z = (gethash (cons x y) cells)
+                      do
+                      (if z
+                          (let ((help (when eperiodic-use-popup-help
+                                        (eperiodic-get-help-string z)))
+                                (start (point)))
+                            (insert
+                             (format
+                              (format "%%-%ds" (+ separation display-width))
+                              (eperiodic-get-element-property z 'symbol)))
+                            (when (fboundp eperiodic-colour-element-function)
+                              (setq face
+                                    (funcall eperiodic-colour-element-function
+                                             z)))
+                            (add-text-properties
+                             start (- (point) separation)
+                             `(face ,face
+                                    eperiodic-at-number ,z
+                                    help-echo ,help)))
+                        (let ((padding
+                               (make-string (+ separation display-width) ?\ )))
+                          (add-text-properties
+                           0 display-width '(face eperiodic-padding-face)
+                           padding)
+                          (insert padding))))
+             (insert "\n"))
+    (let* ((header "PERIODIC CHART OF THE ELEMENTS")
+           (table-width (+ indentation
+                           (* width (+ display-width separation))))
+           (padding (max 0 (/ (- table-width (length header)) 2))))
+      (add-text-properties 0 (length header)
+                           '(face eperiodic-header-face) header)
+      (if (boundp 'header-line-format)
+          (setq header-line-format
+                (concat
+                 (propertize " " 'display `(space :align-to ,padding))
+                 header))
+        (goto-char (point-min))
+        (insert (make-string padding ?\ ) header "\n")))
+    (goto-char (point-max))
+    (eperiodic-insert-key))
+  (setq eperiodic-element-end-marker (point-max-marker))
+  (goto-char
+   (or (text-property-any (point-min) (point-max)
+                          'eperiodic-at-number
+                          eperiodic-last-displayed-element)
+       (text-property-any (point-min) (point-max)
+                          'eperiodic-at-number 1))))
+
 (defun eperiodic-update-element-info (&optional force)
   "Display data for the element with atomic number Z.
 Try not to do unnecessary updates, but always update if FORCE is
@@ -4444,7 +4710,9 @@ non-null."
 
 (defun eperiodic-display ()
   "Display periodic table in the current buffer."
-  (eperiodic-insert-table)
+  (if (eq eperiodic-display-type 'adomah)
+      (eperiodic-insert-adomah-table)
+    (eperiodic-insert-table))
   (eperiodic-update-element-info t))
 
 (defun eperiodic-display-preserve-point ()
@@ -5098,7 +5366,8 @@ See `eperiodic-display-lists'."
   (interactive)
   (let ((completion-ignore-case t)
         (table '(("Separate lanthanides/actinides" . conventional)
-                 ("By atomic number" . ordered)))
+                 ("By atomic number" . ordered)
+                 ("ADOMAH" . adomah)))
         choice)
     (setq choice
           (cdr (assoc
@@ -5107,6 +5376,24 @@ See `eperiodic-display-lists'."
     (when (and choice
                (not (equal choice eperiodic-display-type)))
       (setq eperiodic-display-type choice)
+      (eperiodic-display))))
+
+(defun eperiodic-choose-adomah-orientation ()
+  "Choose the direction in which the ADOMAH orbital blocks extend."
+  (interactive)
+  (unless (eq eperiodic-display-type 'adomah)
+    (user-error "The current display is not ADOMAH"))
+  (let* ((table '(("Up" . up)
+                  ("Right" . right)
+                  ("Down" . down)
+                  ("Left" . left)))
+         (choice
+          (cdr (assoc
+                (completing-read "ADOMAH orientation: " table nil t)
+                table))))
+    (when (and choice
+               (not (eq choice eperiodic-adomah-orientation)))
+      (setq eperiodic-adomah-orientation choice)
       (eperiodic-display))))
 
 (defun eperiodic-set-current-property-values ()
@@ -5158,6 +5445,7 @@ will be meaningful to `string-to-number'."
     (define-key map (kbd "Q")   'eperiodic-kill-buffer)
     (define-key map (kbd "s")   'eperiodic-show-element-properties)
     (define-key map (kbd "t")   'eperiodic-choose-display-type)
+    (define-key map (kbd "r")   'eperiodic-choose-adomah-orientation)
     (define-key map (kbd "w")   'eperiodic-web-lookup)
     (define-key map (kbd "+")   'eperiodic-increase-property-value)
     (define-key map (kbd "-")   'eperiodic-decrease-property-value)
@@ -5191,6 +5479,8 @@ will be meaningful to `string-to-number'."
       "---"
       ["Choose Colour Scheme"     eperiodic-choose-colour-scheme t]
       ["Choose Display Type"      eperiodic-choose-display-type t]
+      ["Choose ADOMAH Orientation" eperiodic-choose-adomah-orientation
+       (eq eperiodic-display-type 'adomah)]
       "---"
       ["Next Colour Scheme"       eperiodic-next-colour-scheme t]
       ["Previous Colour Scheme"   eperiodic-previous-colour-scheme t]
